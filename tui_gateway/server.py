@@ -957,6 +957,13 @@ def _agent_cbs(sid: str) -> dict:
         clarify_callback=lambda q, c: _block(
             "clarify.request", sid, {"question": q, "choices": c}
         ),
+        credential_callback=lambda service, cred_type, url: _block(
+            "credential.request", sid, {
+                "service": service,
+                "type": cred_type,
+                "url": url,
+            }
+        ),
     )
 
 
@@ -2377,6 +2384,13 @@ def _respond(rid, params, key):
 @method("clarify.respond")
 def _(rid, params: dict) -> dict:
     return _respond(rid, params, "answer")
+
+
+@method("credential.respond")
+def _(rid, params: dict) -> dict:
+    # params: {"credential": {"username": "...", "password": "..."}}
+    # or {"credential": {"token": "..."}} or {"credential": ""} for skip
+    return _respond(rid, params, "credential")
 
 
 @method("sudo.respond")

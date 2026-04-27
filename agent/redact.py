@@ -326,6 +326,41 @@ def redact_sensitive_text(text: str) -> str:
         return phone[:4] + "****" + phone[-4:]
     text = _SIGNAL_PHONE_RE.sub(_redact_phone, text)
 
+    # Session-scoped secrets (credential_fill injected values)
+    if _session_secrets:
+        text = _redact_session_secrets(text)
+
+    return text
+
+
+# --- Session-scoped credential redaction ------------------------------------
+# Values added via add_session_secrets() are masked in redact_sensitive_text()
+# calls for the remainder of the session. Used by credential_fill to prevent
+# injected credentials from leaking through browser_snapshot output.
+
+_session_secrets: set[str] = set()
+
+
+def add_session_secrets(secrets: list[str]) -> None:
+    """Register credential values for session-scoped redaction.
+
+    Any subsequent redact_sensitive_text() call will mask these values.
+    """
+    for s in secrets:
+        if s and len(s) >= 3:
+            _session_secrets.add(s)
+
+
+def clear_session_secrets() -> None:
+    """Clear all session-scoped secrets (call on session end)."""
+    _session_secrets.clear()
+
+
+def _redact_session_secrets(text: str) -> str:
+    """Replace any known session secrets with '***'."""
+    for secret in _session_secrets:
+        if secret in text:
+            text = text.replace(secret, "***")
     return text
 
 

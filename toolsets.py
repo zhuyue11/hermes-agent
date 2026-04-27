@@ -52,6 +52,8 @@ _HERMES_CORE_TOOLS = [
     "session_search",
     # Clarifying questions
     "clarify",
+    # Credential fill (secure website login)
+    "credential_fill",
     # Code execution + delegation
     "execute_code", "delegate_task",
     # Cronjob management
@@ -179,7 +181,13 @@ TOOLSETS = {
         "tools": ["clarify"],
         "includes": []
     },
-    
+
+    "credential_fill": {
+        "description": "Secure website login credential injection from vault",
+        "tools": ["credential_fill"],
+        "includes": []
+    },
+
     "code_execution": {
         "description": "Run Python scripts that call tools programmatically (reduces LLM round trips)",
         "tools": ["execute_code"],

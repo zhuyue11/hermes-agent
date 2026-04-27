@@ -729,6 +729,7 @@ class AIAgent:
         thinking_callback: callable = None,
         reasoning_callback: callable = None,
         clarify_callback: callable = None,
+        credential_callback: callable = None,
         step_callback: callable = None,
         stream_delta_callback: callable = None,
         interim_assistant_callback: callable = None,
@@ -936,6 +937,7 @@ class AIAgent:
         self.thinking_callback = thinking_callback
         self.reasoning_callback = reasoning_callback
         self.clarify_callback = clarify_callback
+        self.credential_callback = credential_callback
         self.step_callback = step_callback
         self.stream_delta_callback = stream_delta_callback
         self.interim_assistant_callback = interim_assistant_callback
@@ -7655,6 +7657,28 @@ class AIAgent:
         finally:
             self._executing_tools = False
 
+    # --- Credential vault bridge (sidecar HTTP client) ----------------------
+
+    def _vault_lookup(self, url: str) -> dict | None:
+        """Look up stored credentials from the sidecar vault by URL."""
+        try:
+            from agent.credential_vault import vault_lookup
+            return vault_lookup(url)
+        except Exception as exc:
+            logger.debug("Vault lookup failed: %s", exc)
+            return None
+
+    def _vault_store(
+        self, service: str, cred_type: str, secret_data: dict,
+        label: str = "", url_patterns: list | None = None,
+    ) -> None:
+        """Store credentials in the sidecar vault for future use."""
+        try:
+            from agent.credential_vault import vault_store
+            vault_store(service, cred_type, secret_data, label, url_patterns)
+        except Exception as exc:
+            logger.debug("Vault store failed: %s", exc)
+
     def _dispatch_delegate_task(self, function_args: dict) -> str:
         """Single call site for delegate_task dispatch.
 
@@ -7741,6 +7765,19 @@ class AIAgent:
                 question=function_args.get("question", ""),
                 choices=function_args.get("choices"),
                 callback=self.clarify_callback,
+            )
+        elif function_name == "credential_fill":
+            from tools.credential_fill_tool import credential_fill_tool as _credential_fill
+            return _credential_fill(
+                url=function_args.get("url", ""),
+                username_ref=function_args.get("username_ref"),
+                password_ref=function_args.get("password_ref"),
+                submit_ref=function_args.get("submit_ref"),
+                token_ref=function_args.get("token_ref"),
+                task_id=effective_task_id,
+                credential_callback=self.credential_callback,
+                vault_lookup=self._vault_lookup,
+                vault_store=self._vault_store,
             )
         elif function_name == "delegate_task":
             return self._dispatch_delegate_task(function_args)
@@ -8256,6 +8293,22 @@ class AIAgent:
                 tool_duration = time.time() - tool_start_time
                 if self._should_emit_quiet_tool_messages():
                     self._vprint(f"  {_get_cute_tool_message_impl('clarify', function_args, tool_duration, result=function_result)}")
+            elif function_name == "credential_fill":
+                from tools.credential_fill_tool import credential_fill_tool as _credential_fill
+                function_result = _credential_fill(
+                    url=function_args.get("url", ""),
+                    username_ref=function_args.get("username_ref"),
+                    password_ref=function_args.get("password_ref"),
+                    submit_ref=function_args.get("submit_ref"),
+                    token_ref=function_args.get("token_ref"),
+                    task_id=effective_task_id,
+                    credential_callback=self.credential_callback,
+                    vault_lookup=self._vault_lookup,
+                    vault_store=self._vault_store,
+                )
+                tool_duration = time.time() - tool_start_time
+                if self._should_emit_quiet_tool_messages():
+                    self._vprint(f"  {_get_cute_tool_message_impl('credential_fill', function_args, tool_duration, result=function_result)}")
             elif function_name == "delegate_task":
                 tasks_arg = function_args.get("tasks")
                 if tasks_arg and isinstance(tasks_arg, list):
