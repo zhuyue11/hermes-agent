@@ -7781,6 +7781,12 @@ class AIAgent:
             )
         elif function_name == "delegate_task":
             return self._dispatch_delegate_task(function_args)
+        elif function_name == "delegate_to_agent":
+            from tools.registry import registry as _tool_registry
+            return _tool_registry.dispatch(
+                function_name, function_args,
+                task_id=effective_task_id, parent_agent=self,
+            )
         else:
             return handle_function_call(
                 function_name, function_args, effective_task_id,
@@ -8330,6 +8336,31 @@ class AIAgent:
                     self._delegate_spinner = None
                     tool_duration = time.time() - tool_start_time
                     cute_msg = _get_cute_tool_message_impl('delegate_task', function_args, tool_duration, result=_delegate_result)
+                    if spinner:
+                        spinner.stop(cute_msg)
+                    elif self._should_emit_quiet_tool_messages():
+                        self._vprint(f"  {cute_msg}")
+            elif function_name == "delegate_to_agent":
+                target_name = (function_args.get("agent_name") or "")[:30]
+                spinner_label = f"🤝 → {target_name}" if target_name else "🤝 delegating"
+                spinner = None
+                if self._should_emit_quiet_tool_messages() and self._should_start_quiet_spinner():
+                    face = random.choice(KawaiiSpinner.get_waiting_faces())
+                    spinner = KawaiiSpinner(f"{face} {spinner_label}", spinner_type='dots', print_fn=self._print_fn)
+                    spinner.start()
+                self._delegate_spinner = spinner
+                _delegate_result = None
+                try:
+                    from tools.registry import registry as _tool_registry
+                    function_result = _tool_registry.dispatch(
+                        function_name, function_args,
+                        task_id=effective_task_id, parent_agent=self,
+                    )
+                    _delegate_result = function_result
+                finally:
+                    self._delegate_spinner = None
+                    tool_duration = time.time() - tool_start_time
+                    cute_msg = _get_cute_tool_message_impl('delegate_to_agent', function_args, tool_duration, result=_delegate_result)
                     if spinner:
                         spinner.stop(cute_msg)
                     elif self._should_emit_quiet_tool_messages():

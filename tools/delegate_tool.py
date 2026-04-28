@@ -40,6 +40,8 @@ from utils import base_url_hostname, is_truthy_value
 DELEGATE_BLOCKED_TOOLS = frozenset(
     [
         "delegate_task",  # no recursive delegation
+        "delegate_to_agent",  # no cross-agent delegation from children
+        "list_available_agents",  # useless without delegate_to_agent
         "clarify",  # no user interaction
         "memory",  # no writes to shared MEMORY.md
         "send_message",  # no cross-platform side effects
