@@ -118,14 +118,19 @@ def _get_enabled_plugins() -> Optional[set]:
         config = load_config()
         plugins_cfg = config.get("plugins")
         if not isinstance(plugins_cfg, dict):
+            logger.warning("_get_enabled_plugins: plugins config is not a dict: %s", type(plugins_cfg))
             return None
         if "enabled" not in plugins_cfg:
+            logger.warning("_get_enabled_plugins: no 'enabled' key. keys=%s", list(plugins_cfg.keys()))
             return None
         enabled = plugins_cfg.get("enabled")
         if not isinstance(enabled, list):
+            logger.warning("_get_enabled_plugins: enabled is not a list: %r (%s)", enabled, type(enabled))
             return None
+        logger.info("_get_enabled_plugins: resolved %d plugins: %s", len(enabled), enabled)
         return set(enabled)
-    except Exception:
+    except Exception as exc:
+        logger.warning("_get_enabled_plugins failed with exception: %s", exc, exc_info=True)
         return None
 
 
