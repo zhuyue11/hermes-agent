@@ -884,6 +884,27 @@ BROWSER_TOOL_SCHEMAS = [
             "required": []
         }
     },
+    {
+        "name": "browser_upload",
+        "description": "Upload files to a file input element (e.g., image upload, document attachment). "
+                       "The element must be a file input or an upload dropzone identified by its ref ID "
+                       "from the snapshot. Supports multiple files. Requires browser_navigate to be called first.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "ref": {
+                    "type": "string",
+                    "description": "The file input element reference from the snapshot (e.g., '@e5')"
+                },
+                "files": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "List of absolute file paths to upload (e.g., ['/path/to/image.jpg', '/path/to/photo.png'])"
+                }
+            },
+            "required": ["ref", "files"]
+        }
+    },
 ]
 
 
@@ -1828,6 +1849,48 @@ def browser_console(clear: bool = False, expression: Optional[str] = None, task_
     }, ensure_ascii=False)
 
 
+def browser_upload(ref: str, files: list, task_id: Optional[str] = None) -> str:
+    """Upload files to a file input element.
+
+    Args:
+        ref: Element reference (e.g., "@e5")
+        files: List of absolute file paths to upload
+        task_id: Task identifier for session isolation
+
+    Returns:
+        JSON string with upload result
+    """
+    effective_task_id = task_id or "default"
+
+    if not ref.startswith("@"):
+        ref = f"@{ref}"
+
+    if not files:
+        return json.dumps({"success": False, "error": "No files provided"}, ensure_ascii=False)
+
+    # Validate all files exist before attempting upload
+    missing = [f for f in files if not os.path.isfile(f)]
+    if missing:
+        return json.dumps({
+            "success": False,
+            "error": f"Files not found: {missing}"
+        }, ensure_ascii=False)
+
+    result = _run_browser_command(effective_task_id, "upload", [ref] + files)
+
+    if result.get("success"):
+        return json.dumps({
+            "success": True,
+            "uploaded": files,
+            "element": ref
+        }, ensure_ascii=False)
+    else:
+        return json.dumps({
+            "success": False,
+            "error": result.get("error", f"Failed to upload to {ref}")
+        }, ensure_ascii=False)
+
+
 def _browser_eval(expression: str, task_id: Optional[str] = None) -> str:
     """Evaluate a JavaScript expression in the page context and return the result."""
     if _is_camofox_mode():
@@ -2511,4 +2574,13 @@ registry.register(
     handler=lambda args, **kw: browser_console(clear=args.get("clear", False), expression=args.get("expression"), task_id=kw.get("task_id")),
     check_fn=check_browser_requirements,
     emoji="🖥️",
+)
+registry.register(
+    name="browser_upload",
+    toolset="browser",
+    schema=_BROWSER_SCHEMA_MAP["browser_upload"],
+    handler=lambda args, **kw: browser_upload(
+        ref=args.get("ref", ""), files=args.get("files", []), task_id=kw.get("task_id")),
+    check_fn=check_browser_requirements,
+    emoji="📎",
 )
