@@ -6,15 +6,13 @@ Base version: `v0.11.0` (commit `bf196a3f`, 2026-04-23)
 
 ---
 
-## Feature 1: Per-Agent Memory Isolation (Phase 10.6)
+## ~~Feature 1: Per-Agent Memory Isolation (Phase 10.6)~~ — REVERTED
 
-Each agent in the dooooHub agent registry gets its own `MEMORY.md` file while sharing a single `USER.md` across all agents.
+Removed. All agents now share a single `MEMORY.md` and `USER.md` in `~/.hermes/memories/`. Memory isolation was unnecessary — agents serve the same user and benefit from shared context (user preferences, project facts). Behavioral differences are handled by each agent's personality/system prompt, not memory isolation. External memory providers (mem0, honcho, etc.) were never isolated per-agent anyway.
 
-**Changed files:**
-- `run_agent.py` — `AIAgent.__init__` forwards `memory_dir` kwarg to `MemoryStore`
-- `tools/memory_tool.py` — `MemoryStore` gains `memory_dir` param; `_path_for()` routes `MEMORY.md` to agent-specific subdir, keeps `USER.md` in shared root
-
-**Commit:** `3b35902e`
+**Reverted changes:**
+- `run_agent.py` — Removed `memory_dir` param from `AIAgent.__init__`
+- `tools/memory_tool.py` — Removed `memory_dir` param from `MemoryStore`; `_path_for()` always uses the global memories directory
 
 ---
 

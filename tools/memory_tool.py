@@ -113,20 +113,17 @@ class MemoryStore:
         Tool responses always reflect this live state.
     """
 
-    def __init__(self, memory_char_limit: int = 2200, user_char_limit: int = 1375, memory_dir: Path = None):
+    def __init__(self, memory_char_limit: int = 2200, user_char_limit: int = 1375):
         self.memory_entries: List[str] = []
         self.user_entries: List[str] = []
         self.memory_char_limit = memory_char_limit
         self.user_char_limit = user_char_limit
-        self._memory_dir = memory_dir  # Per-agent override; None = global
         # Frozen snapshot for system prompt -- set once at load_from_disk()
         self._system_prompt_snapshot: Dict[str, str] = {"memory": "", "user": ""}
 
     def load_from_disk(self):
         """Load entries from MEMORY.md and USER.md, capture system prompt snapshot."""
         get_memory_dir().mkdir(parents=True, exist_ok=True)
-        if self._memory_dir:
-            self._memory_dir.mkdir(parents=True, exist_ok=True)
 
         self.memory_entries = self._read_file(self._path_for("memory"))
         self.user_entries = self._read_file(self._path_for("user"))
@@ -181,8 +178,6 @@ class MemoryStore:
     def _path_for(self, target: str) -> Path:
         if target == "user":
             return get_memory_dir() / "USER.md"
-        if self._memory_dir:
-            return self._memory_dir / "MEMORY.md"
         return get_memory_dir() / "MEMORY.md"
 
     def _reload_target(self, target: str):
