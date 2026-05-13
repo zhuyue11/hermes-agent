@@ -752,6 +752,10 @@ class AIAgent:
         skip_memory: bool = False,
         session_db=None,
         parent_session_id: str = None,
+        agent_slug: str = None,
+        team_slug: str = None,
+        workflow_slug: str = None,
+        chain_id: str = None,
         iteration_budget: "IterationBudget" = None,
         fallback_model: Dict[str, Any] = None,
         credential_pool=None,
@@ -1383,6 +1387,14 @@ class AIAgent:
         # SQLite session store (optional -- provided by CLI or gateway)
         self._session_db = session_db
         self._parent_session_id = parent_session_id
+        # dooooHub chain context — stashed for create_session below and for
+        # plugins (e.g. delegate_to_agent, handoff_to) that read these off
+        # `parent_agent`. Must be set BEFORE the create_session call below
+        # so the four columns land in `sessions` on insert.
+        self.agent_slug = agent_slug
+        self.team_slug = team_slug
+        self.workflow_slug = workflow_slug
+        self.chain_id = chain_id
         self._last_flushed_db_idx = 0  # tracks DB-write cursor to prevent duplicate writes
         if self._session_db:
             try:
@@ -1397,6 +1409,10 @@ class AIAgent:
                     },
                     user_id=None,
                     parent_session_id=self._parent_session_id,
+                    agent_slug=self.agent_slug,
+                    team_slug=self.team_slug,
+                    workflow_slug=self.workflow_slug,
+                    chain_id=self.chain_id,
                 )
             except Exception as e:
                 # Transient SQLite lock contention (e.g. CLI and gateway writing
@@ -7584,6 +7600,10 @@ class AIAgent:
                     source=self.platform or os.environ.get("HERMES_SESSION_SOURCE", "cli"),
                     model=self.model,
                     parent_session_id=old_session_id,
+                    agent_slug=self.agent_slug,
+                    team_slug=self.team_slug,
+                    workflow_slug=self.workflow_slug,
+                    chain_id=self.chain_id,
                 )
                 # Auto-number the title for the continuation session
                 if old_title:
