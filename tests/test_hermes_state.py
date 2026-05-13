@@ -35,6 +35,47 @@ class TestSessionLifecycle:
         assert session["model"] == "test-model"
         assert session["ended_at"] is None
 
+    def test_create_session_with_chain_context(self, db):
+        """v10: agent_slug + team_slug + workflow_slug + chain_id roundtrip.
+
+        These four columns carry the dooooHub task-system chain context:
+        agent_slug = who is speaking; team_slug + workflow_slug + chain_id
+        identify the team / workflow / run the chain belongs to.
+        """
+        db.create_session(
+            session_id="s_chain",
+            source="hub",
+            agent_slug="@doooo/visual-designer",
+            team_slug="@doooo/brand-designer",
+            workflow_slug="scope-and-tagline",
+            chain_id="chain-123",
+        )
+        session = db.get_session("s_chain")
+        assert session["agent_slug"] == "@doooo/visual-designer"
+        assert session["team_slug"] == "@doooo/brand-designer"
+        assert session["workflow_slug"] == "scope-and-tagline"
+        assert session["chain_id"] == "chain-123"
+
+    def test_create_session_without_chain_context(self, db):
+        """v10: all four chain-context kwargs default to NULL when omitted."""
+        db.create_session(session_id="s_plain", source="cli")
+        session = db.get_session("s_plain")
+        assert session["agent_slug"] is None
+        assert session["team_slug"] is None
+        assert session["workflow_slug"] is None
+        assert session["chain_id"] is None
+
+    def test_v10_indexes_exist(self, db):
+        """v10 partial indexes exist for chain-context lookups."""
+        idx = {
+            row["name"]
+            for row in db._conn.execute("PRAGMA index_list(sessions)").fetchall()
+        }
+        assert "idx_sessions_agent_slug" in idx
+        assert "idx_sessions_team_slug" in idx
+        assert "idx_sessions_workflow_slug" in idx
+        assert "idx_sessions_chain" in idx
+
     def test_get_nonexistent_session(self, db):
         assert db.get_session("nonexistent") is None
 
@@ -1173,7 +1214,7 @@ class TestSchemaInit:
     def test_schema_version(self, db):
         cursor = db._conn.execute("SELECT version FROM schema_version")
         version = cursor.fetchone()[0]
-        assert version == 8
+        assert version == 10
 
     def test_title_column_exists(self, db):
         """Verify the title column was created in the sessions table."""
@@ -1229,12 +1270,13 @@ class TestSchemaInit:
         conn.commit()
         conn.close()
 
-        # Open with SessionDB — should migrate to v8
+        # Open with SessionDB — should migrate to the current schema version.
         migrated_db = SessionDB(db_path=db_path)
 
-        # Verify migration
+        # Verify migration ran all the way to the current head version.
+        from hermes_state import SCHEMA_VERSION
         cursor = migrated_db._conn.execute("SELECT version FROM schema_version")
-        assert cursor.fetchone()[0] == 8
+        assert cursor.fetchone()[0] == SCHEMA_VERSION
 
         # Verify title column exists and is NULL for existing sessions
         session = migrated_db.get_session("existing")

@@ -43,4 +43,24 @@ When the agent encounters a website login form during browser automation, the `c
 - `agent/redact.py` — Added session-scoped secret redaction: `_session_secrets` set, `add_session_secrets()`, `clear_session_secrets()`, `_redact_session_secrets()`, hooked into `redact_sensitive_text()`
 - `tui_gateway/server.py` — Added `credential_callback` to `_agent_cbs()` (emits `credential.request`, blocks until `credential.respond`); added `@method("credential.respond")` JSON-RPC handler
 
-**Not yet committed**
+---
+
+## Feature 4: Chain-Aware Sessions (task-system v1, Phase 4)
+
+Extends Feature 2 so sessions can record the *chain* context they belong to, not just the agent. Sidecar's task system (`dooooHub/docs/task-system.md`) builds workflow chains across multiple agents under a single team; each chain step gets its own Hermes session, but they share team / workflow / chain identity. Storing those three columns lets the sidecar (a) JOIN messages by team for team-chat views (Phase 7), (b) let `handoff_to` walk the correct workflow (Phase 9), (c) reconstruct chain transcripts by `chain_id` (Phase 11). Hermes does no filtering on these — pure passive storage.
+
+Also renames the existing v9 column `sessions.agent_id` to `sessions.agent_slug`, switching its value semantics from "registry UUID" to "namespaced marketplace slug" (e.g. `@doooo/visual-designer`) so all four context columns share one vocabulary. The sidecar no longer resolves slug→UUID before writing.
+
+**Schema bump:** v9 → v10
+- `ALTER TABLE sessions RENAME COLUMN agent_id TO agent_slug`
+- New columns: `team_slug TEXT`, `workflow_slug TEXT`, `chain_id TEXT` (all nullable)
+- New partial indexes (`WHERE col IS NOT NULL`): `idx_sessions_team_slug`, `idx_sessions_workflow_slug`, `idx_sessions_chain`
+- Renamed index: `idx_sessions_agent` → `idx_sessions_agent_slug`
+
+**API surface:** `create_session()` and `ensure_session()` gained `agent_slug` (renamed from `agent_id`), `team_slug`, `workflow_slug`, `chain_id` kwargs. All pass-through, no validation or filtering inside Hermes.
+
+**No data backfill.** Pre-v10 sessions keep their legacy UUID-shaped values in the renamed `agent_slug` column; doooo is pre-prod and dev DBs wipe via repo reset if a clean slate is wanted.
+
+**Changed files:**
+- `hermes_state.py` — `SCHEMA_VERSION` 9→10, canonical `CREATE TABLE sessions` updated, v10 migration block added, `create_session()` / `ensure_session()` signatures + INSERTs updated
+- `tests/test_hermes_state.py` — Added three v10 tests inside `TestSessionLifecycle` (roundtrip with values, roundtrip without kwargs, indexes exist)

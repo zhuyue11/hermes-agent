@@ -31,7 +31,7 @@ T = TypeVar("T")
 
 DEFAULT_DB_PATH = get_hermes_home() / "state.db"
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -66,7 +66,10 @@ CREATE TABLE IF NOT EXISTS sessions (
     pricing_version TEXT,
     title TEXT,
     api_call_count INTEGER DEFAULT 0,
-    agent_id TEXT,
+    agent_slug TEXT,
+    team_slug TEXT,
+    workflow_slug TEXT,
+    chain_id TEXT,
     FOREIGN KEY (parent_session_id) REFERENCES sessions(id)
 );
 
@@ -95,8 +98,14 @@ CREATE TABLE IF NOT EXISTS state_meta (
 CREATE INDEX IF NOT EXISTS idx_sessions_source ON sessions(source);
 CREATE INDEX IF NOT EXISTS idx_sessions_parent ON sessions(parent_session_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_started ON sessions(started_at DESC);
-CREATE INDEX IF NOT EXISTS idx_sessions_agent ON sessions(agent_id);
 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, timestamp);
+-- Indexes on migration-added columns (agent_slug, team_slug, workflow_slug,
+-- chain_id) are NOT in SCHEMA_SQL — when SCHEMA_SQL runs on a pre-migration
+-- DB, those columns don't yet exist, so CREATE INDEX would fail. They live
+-- in the "always ensure it exists" block at the end of _init_schema(),
+-- after the migration ladder has guaranteed the columns are present. Same
+-- pattern as idx_sessions_title_unique (column added in v3, index ensured
+-- post-ladder).
 """
 
 FTS_SQL = """
@@ -374,9 +383,59 @@ class SessionDB:
                 except sqlite3.OperationalError:
                     pass  # Index already exists
                 cursor.execute("UPDATE schema_version SET version = 9")
+            if current_version < 10:
+                # v10: rename agent_id → agent_slug (now stores the namespaced
+                # marketplace slug, e.g. "@doooo/visual-designer", consistent
+                # with the new team_slug / workflow_slug / chain_id columns
+                # below). Add team_slug, workflow_slug, chain_id so the
+                # dooooHub sidecar can: (a) JOIN messages by team for
+                # team-chat views (Phase 7), (b) let handoff_to walk the
+                # correct workflow (Phase 9), (c) reconstruct chain
+                # transcripts by chain_id (Phase 11). Hermes does no
+                # filtering on these — pure storage. No data backfill: pre-v10
+                # rows keep their legacy UUID-shaped values in the renamed
+                # agent_slug column.
+                try:
+                    cursor.execute(
+                        'ALTER TABLE sessions RENAME COLUMN "agent_id" TO "agent_slug"'
+                    )
+                except sqlite3.OperationalError:
+                    pass  # Already renamed
+                try:
+                    cursor.execute("DROP INDEX IF EXISTS idx_sessions_agent")
+                except sqlite3.OperationalError:
+                    pass
+                try:
+                    cursor.execute(
+                        "CREATE INDEX IF NOT EXISTS idx_sessions_agent_slug "
+                        "ON sessions(agent_slug)"
+                    )
+                except sqlite3.OperationalError:
+                    pass
+                for col in ("team_slug", "workflow_slug", "chain_id"):
+                    try:
+                        cursor.execute(f'ALTER TABLE sessions ADD COLUMN "{col}" TEXT')
+                    except sqlite3.OperationalError:
+                        pass  # Column already exists
+                for col, idx in (
+                    ("team_slug", "idx_sessions_team_slug"),
+                    ("workflow_slug", "idx_sessions_workflow_slug"),
+                    ("chain_id", "idx_sessions_chain"),
+                ):
+                    try:
+                        cursor.execute(
+                            f"CREATE INDEX IF NOT EXISTS {idx} "
+                            f"ON sessions({col}) WHERE {col} IS NOT NULL"
+                        )
+                    except sqlite3.OperationalError:
+                        pass  # Index already exists
+                cursor.execute("UPDATE schema_version SET version = 10")
 
-        # Unique title index — always ensure it exists (safe to run after migrations
-        # since the title column is guaranteed to exist at this point)
+        # Indexes on migration-added columns — always ensure they exist
+        # (safe to run after the migration ladder since the columns are
+        # guaranteed to be present at this point). Kept out of SCHEMA_SQL
+        # because executescript() on a pre-migration DB doesn't have the
+        # columns yet.
         try:
             cursor.execute(
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_title_unique "
@@ -384,6 +443,25 @@ class SessionDB:
             )
         except sqlite3.OperationalError:
             pass  # Index already exists
+        try:
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_sessions_agent_slug "
+                "ON sessions(agent_slug)"
+            )
+        except sqlite3.OperationalError:
+            pass
+        for col, idx in (
+            ("team_slug", "idx_sessions_team_slug"),
+            ("workflow_slug", "idx_sessions_workflow_slug"),
+            ("chain_id", "idx_sessions_chain"),
+        ):
+            try:
+                cursor.execute(
+                    f"CREATE INDEX IF NOT EXISTS {idx} "
+                    f"ON sessions({col}) WHERE {col} IS NOT NULL"
+                )
+            except sqlite3.OperationalError:
+                pass
 
         # FTS5 setup (separate because CREATE VIRTUAL TABLE can't be in executescript with IF NOT EXISTS reliably)
         try:
@@ -406,14 +484,18 @@ class SessionDB:
         system_prompt: str = None,
         user_id: str = None,
         parent_session_id: str = None,
-        agent_id: str = None,
+        agent_slug: str = None,
+        team_slug: str = None,
+        workflow_slug: str = None,
+        chain_id: str = None,
     ) -> str:
         """Create a new session record. Returns the session_id."""
         def _do(conn):
             conn.execute(
                 """INSERT OR IGNORE INTO sessions (id, source, user_id, model, model_config,
-                   system_prompt, parent_session_id, started_at, agent_id)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   system_prompt, parent_session_id, started_at, agent_slug,
+                   team_slug, workflow_slug, chain_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     session_id,
                     source,
@@ -423,7 +505,10 @@ class SessionDB:
                     system_prompt,
                     parent_session_id,
                     time.time(),
-                    agent_id,
+                    agent_slug,
+                    team_slug,
+                    workflow_slug,
+                    chain_id,
                 ),
             )
         self._execute_write(_do)
@@ -564,7 +649,10 @@ class SessionDB:
         session_id: str,
         source: str = "unknown",
         model: str = None,
-        agent_id: str = None,
+        agent_slug: str = None,
+        team_slug: str = None,
+        workflow_slug: str = None,
+        chain_id: str = None,
     ) -> None:
         """Ensure a session row exists, creating it with minimal metadata if absent.
 
@@ -575,9 +663,19 @@ class SessionDB:
         def _do(conn):
             conn.execute(
                 """INSERT OR IGNORE INTO sessions
-                   (id, source, model, started_at, agent_id)
-                   VALUES (?, ?, ?, ?, ?)""",
-                (session_id, source, model, time.time(), agent_id),
+                   (id, source, model, started_at, agent_slug,
+                    team_slug, workflow_slug, chain_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    session_id,
+                    source,
+                    model,
+                    time.time(),
+                    agent_slug,
+                    team_slug,
+                    workflow_slug,
+                    chain_id,
+                ),
             )
         self._execute_write(_do)
 
