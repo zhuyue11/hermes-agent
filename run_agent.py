@@ -756,7 +756,6 @@ class AIAgent:
         team_slug: str = None,
         workflow_slug: str = None,
         chain_id: str = None,
-        local_task_id: str = None,
         iteration_budget: "IterationBudget" = None,
         fallback_model: Dict[str, Any] = None,
         credential_pool=None,
@@ -1396,7 +1395,6 @@ class AIAgent:
         self.team_slug = team_slug
         self.workflow_slug = workflow_slug
         self.chain_id = chain_id
-        self.local_task_id = local_task_id
         self._last_flushed_db_idx = 0  # tracks DB-write cursor to prevent duplicate writes
         if self._session_db:
             try:
